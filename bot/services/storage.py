@@ -29,6 +29,19 @@ CREATE INDEX IF NOT EXISTS idx_transcriptions_user
 CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_user_week
     ON task_plans(user_id, week_start);
 
+CREATE TABLE IF NOT EXISTS work_sessions (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id                 INTEGER NOT NULL,
+    date                    TEXT    NOT NULL,
+    tasks                   TEXT    NOT NULL DEFAULT '[]',
+    display_idx             INTEGER NOT NULL DEFAULT 0,
+    current_task_message_id INTEGER,
+    created_at              DATETIME DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_user_date
+    ON work_sessions(user_id, date);
+
 PRAGMA journal_mode=WAL;
 """
 
@@ -138,3 +151,72 @@ async def get_transcription_count(user_id: int) -> int:
         )
         row = await cursor.fetchone()
         return row[0] if row else 0
+
+
+# ── Work sessions ──────────────────────────────────────────────────────────────
+
+async def get_work_session(user_id: int, date_str: str) -> dict | None:
+    async with aiosqlite.connect(settings.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM work_sessions WHERE user_id = ? AND date = ?",
+            (user_id, date_str),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def create_work_session(user_id: int, date_str: str, tasks: list[dict]) -> None:
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO work_sessions (user_id, date, tasks) VALUES (?, ?, ?)",
+            (user_id, date_str, json.dumps(tasks, ensure_ascii=False)),
+        )
+        await db.commit()
+
+
+async def update_session_tasks(user_id: int, date_str: str, tasks: list[dict]) -> None:
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute(
+            "UPDATE work_sessions SET tasks = ? WHERE user_id = ? AND date = ?",
+            (json.dumps(tasks, ensure_ascii=False), user_id, date_str),
+        )
+        await db.commit()
+
+
+async def update_session_display_idx(user_id: int, date_str: str, display_idx: int) -> None:
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute(
+            "UPDATE work_sessions SET display_idx = ? WHERE user_id = ? AND date = ?",
+            (display_idx, user_id, date_str),
+        )
+        await db.commit()
+
+
+async def update_session_message_id(user_id: int, date_str: str, message_id: int) -> None:
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute(
+            "UPDATE work_sessions SET current_task_message_id = ? WHERE user_id = ? AND date = ?",
+            (message_id, user_id, date_str),
+        )
+        await db.commit()
+
+
+async def delete_work_session(user_id: int, date_str: str) -> None:
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute(
+            "DELETE FROM work_sessions WHERE user_id = ? AND date = ?",
+            (user_id, date_str),
+        )
+        await db.commit()
+
+
+async def get_week_sessions(user_id: int) -> list[dict]:
+    week_start = _week_start_str()
+    async with aiosqlite.connect(settings.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM work_sessions WHERE user_id = ? AND date >= ? ORDER BY date ASC",
+            (user_id, week_start),
+        )
+        return [dict(row) for row in await cursor.fetchall()]

@@ -7,3 +7,7 @@ class TranscriptionStates(StatesGroup):
 
 class PlanStates(StatesGroup):
     waiting_for_edit = State()
+
+
+class WorkStates(StatesGroup):
+    selecting = State()

@@ -3,11 +3,14 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode  # noqa: F401 (used via DefaultBotProperties)
+from aiogram.enums import ParseMode
 
 from bot.config import settings
 from bot.handlers import voice, commands
+from bot.handlers import work as work_handler
 from bot.services.storage import init_db
+
+logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
@@ -22,9 +25,10 @@ async def main() -> None:
     dp = Dispatcher()
 
     dp.include_router(commands.router)
+    dp.include_router(work_handler.router)
     dp.include_router(voice.router)
 
-    logging.info("Bot started")
+    logger.info("Bot started")
     await dp.start_polling(bot)
 
 

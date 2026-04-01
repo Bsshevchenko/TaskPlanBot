@@ -3,3 +3,4 @@ mlx-whisper>=0.4.0
 anthropic>=0.40.0
 aiosqlite>=0.20.0
 python-dotenv>=1.0.0
+pytz>=2024.1
