@@ -11,3 +11,9 @@ class PlanStates(StatesGroup):
 
 class WorkStates(StatesGroup):
     selecting = State()
+
+
+class BacklogStates(StatesGroup):
+    waiting_for_voice = State()
+    confirming = State()
+    waiting_for_edit = State()

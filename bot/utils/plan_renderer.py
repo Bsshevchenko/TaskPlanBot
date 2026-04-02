@@ -10,6 +10,19 @@ SECTION_EMOJI_TO_CATEGORY = {
 }
 
 
+def render_plan_with_done(plan_html: str, done_texts: set[str]) -> str:
+    """Возвращает план с зачёркнутыми выполненными задачами."""
+    lines = []
+    for line in plan_html.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("• "):
+            task_text = stripped[2:]
+            if task_text in done_texts:
+                line = line.replace(f"• {task_text}", f"• <s>{task_text}</s>")
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def extract_tasks_with_categories(plan_html: str) -> list[dict]:
     """Возвращает список задач с категориями, сохраняя порядок из плана."""
     tasks = []

@@ -11,6 +11,7 @@ from bot.config import settings
 from bot.services import planner, storage
 from bot.states import PlanStates
 from bot.utils.formatting import split_message
+from bot.utils.plan_renderer import render_plan_with_done
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -40,9 +41,20 @@ async def _delete_messages(bot: Bot, chat_id: int, message_ids: list[int]) -> No
             pass
 
 
-async def _send_plan(bot: Bot, chat_id: int, plan_html: str) -> list[int]:
-    """Отправляет план чанками, возвращает список message_id."""
-    chunks = split_message(plan_html)
+async def _get_done_texts(user_id: int) -> set[str]:
+    done: set[str] = set()
+    for s in await storage.get_week_sessions(user_id):
+        for t in json.loads(s["tasks"]):
+            if t["status"] == "done":
+                done.add(t["text"])
+    return done
+
+
+async def _send_plan(bot: Bot, chat_id: int, plan_html: str, user_id: int) -> list[int]:
+    """Отправляет план чанками с зачёркнутыми выполненными задачами."""
+    done_texts = await _get_done_texts(user_id)
+    rendered = render_plan_with_done(plan_html, done_texts)
+    chunks = split_message(rendered)
     sent_ids = []
     for i, chunk in enumerate(chunks):
         markup = _edit_keyboard() if i == len(chunks) - 1 else None
@@ -107,7 +119,7 @@ async def cmd_plan(message: Message, bot: Bot, state: FSMContext) -> None:
     if existing_plan:
         used_ids = set(json.loads(existing_plan["transcription_ids"]))
         if current_ids == used_ids:
-            sent_ids = await _send_plan(bot, message.chat.id, existing_plan["plan_html"])
+            sent_ids = await _send_plan(bot, message.chat.id, existing_plan["plan_html"], user_id)
             await state.update_data(plan_html=existing_plan["plan_html"], plan_message_ids=sent_ids)
             return
 
@@ -141,7 +153,7 @@ async def cmd_plan(message: Message, bot: Bot, state: FSMContext) -> None:
     await storage.upsert_week_plan(user_id, transcription_ids, plan_html)
     await status_msg.delete()
 
-    sent_ids = await _send_plan(bot, message.chat.id, plan_html)
+    sent_ids = await _send_plan(bot, message.chat.id, plan_html, user_id)
     await state.update_data(plan_html=plan_html, plan_message_ids=sent_ids)
 
 
@@ -178,7 +190,7 @@ async def cmd_re_plan(message: Message, bot: Bot, state: FSMContext) -> None:
     await storage.upsert_week_plan(user_id, used_ids, plan_html)
     await status_msg.delete()
 
-    sent_ids = await _send_plan(bot, message.chat.id, plan_html)
+    sent_ids = await _send_plan(bot, message.chat.id, plan_html, user_id)
     await state.update_data(plan_html=plan_html, plan_message_ids=sent_ids)
 
 
@@ -214,5 +226,5 @@ async def save_edited_plan(message: Message, bot: Bot, state: FSMContext) -> Non
     # Сохраняем в БД и показываем обновлённый план
     await storage.update_week_plan_html(user_id, new_plan)
 
-    sent_ids = await _send_plan(bot, chat_id, new_plan)
+    sent_ids = await _send_plan(bot, chat_id, new_plan, user_id)
     await state.update_data(plan_html=new_plan, plan_message_ids=sent_ids)

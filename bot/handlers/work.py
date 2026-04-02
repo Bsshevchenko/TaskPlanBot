@@ -90,11 +90,10 @@ def _progress_line(tasks: list[dict]) -> str:
     return f"{total_done}/{len(tasks)}  •  " + "  ".join(cat_parts)
 
 
-def _selection_text(tasks: list[dict], selected: set[int], reason: str) -> str:
+def _selection_text(tasks: list[dict], selected: set[int]) -> str:
     now = datetime.now(MOSCOW_TZ)
     header = f"📅 <b>{_day_name()}, {now.strftime('%d.%m.%Y')}</b>"
-    hint = f"\n💡 <i>{reason}</i>" if reason else ""
-    lines = [header + hint, ""]
+    lines = [header, ""]
     for i, t in enumerate(tasks):
         mark = "✓" if i in selected else "○"
         lines.append(f"{mark} {t['emoji']} {i + 1}. {t['text']}")
@@ -185,7 +184,7 @@ async def cmd_work(message: Message, bot: Bot, state: FSMContext) -> None:
         await message.reply("В плане нет задач.")
         return
 
-    # Незавершённые вчера (pending — только те что так и не были начаты/отложены, не done)
+    # Незавершённые вчера
     yesterday_session = await storage.get_work_session(user_id, _yesterday())
     yesterday_texts: list[str] = []
     if yesterday_session:
@@ -200,24 +199,20 @@ async def cmd_work(message: Message, bot: Bot, state: FSMContext) -> None:
             if t["status"] == "done":
                 done_texts.append(t["text"])
 
-    status_msg = await message.reply("⏳ Формирую план на день...")
-
-    try:
-        suggestion = await planner.suggest_daily_tasks(all_tasks, _day_name(), done_texts, yesterday_texts)
-    except Exception as e:
-        logger.error("suggest_daily_tasks error: %s", e)
-        await status_msg.edit_text("Не удалось получить рекомендации. Попробуй ещё раз.")
+    # Убираем уже выполненные задачи из списка выбора
+    done_set = set(done_texts)
+    all_tasks = [t for t in all_tasks if t["text"] not in done_set]
+    if not all_tasks:
+        await message.reply("🎉 Все задачи из плана уже выполнены на этой неделе!")
         return
 
-    order = suggestion.get("order", list(range(len(all_tasks))))
-    reason = suggestion.get("reason", "")
     selected: set[int] = set()
 
     await state.set_state(WorkStates.selecting)
-    await state.update_data(tasks=all_tasks, selected=list(selected), order=order, reason=reason)
+    await state.update_data(tasks=all_tasks, selected=list(selected))
 
-    await status_msg.edit_text(
-        _selection_text(all_tasks, selected, reason),
+    await message.reply(
+        _selection_text(all_tasks, selected),
         reply_markup=_selection_keyboard(len(all_tasks), selected),
     )
 
@@ -255,7 +250,7 @@ async def cmd_re_work(message: Message, state: FSMContext) -> None:
     await state.update_data(tasks=new_tasks, selected=list(selected), mode="re_work")
 
     await message.reply(
-        _selection_text(new_tasks, selected, "Выбери задачи для добавления в сегодняшний день"),
+        _selection_text(new_tasks, selected),
         reply_markup=_re_work_keyboard(len(new_tasks), selected),
     )
 
@@ -326,7 +321,7 @@ async def toggle_task(callback: CallbackQuery, callback_data: TaskToggle, state:
 
     kb = _re_work_keyboard(len(tasks), selected) if mode == "re_work" else _selection_keyboard(len(tasks), selected)
     await callback.message.edit_text(  # type: ignore[union-attr]
-        _selection_text(tasks, selected, data.get("reason", "")),
+        _selection_text(tasks, selected),
         reply_markup=kb,
     )
     await callback.answer()
@@ -337,14 +332,12 @@ async def start_session(callback: CallbackQuery, bot: Bot, state: FSMContext) ->
     data = await state.get_data()
     tasks: list[dict] = data["tasks"]
     selected = set(data["selected"])
-    order: list[int] = data["order"]
 
     if not selected:
         await callback.answer("Выбери хотя бы одну задачу!", show_alert=True)
         return
 
-    ordered = [i for i in order if i in selected] + [i for i in sorted(selected) if i not in order]
-    session_tasks = [{**tasks[i], "status": "pending"} for i in ordered]
+    session_tasks = [{**tasks[i], "status": "pending"} for i in sorted(selected)]
 
     user_id = callback.from_user.id
     today = _today()

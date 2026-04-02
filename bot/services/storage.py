@@ -42,6 +42,17 @@ CREATE TABLE IF NOT EXISTS work_sessions (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_user_date
     ON work_sessions(user_id, date);
 
+CREATE TABLE IF NOT EXISTS backlog_items (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL,
+    text       TEXT    NOT NULL,
+    status     TEXT    NOT NULL DEFAULT 'pending',
+    created_at DATETIME DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_backlog_user
+    ON backlog_items(user_id, status);
+
 PRAGMA journal_mode=WAL;
 """
 
@@ -220,3 +231,43 @@ async def get_week_sessions(user_id: int) -> list[dict]:
             (user_id, week_start),
         )
         return [dict(row) for row in await cursor.fetchall()]
+
+
+# ── Backlog ────────────────────────────────────────────────────────────────────
+
+async def add_backlog_item(user_id: int, text: str) -> int:
+    async with aiosqlite.connect(settings.db_path) as db:
+        cursor = await db.execute(
+            "INSERT INTO backlog_items (user_id, text) VALUES (?, ?)",
+            (user_id, text),
+        )
+        await db.commit()
+        return cursor.lastrowid  # type: ignore[return-value]
+
+
+async def get_backlog_items(user_id: int) -> list[dict]:
+    async with aiosqlite.connect(settings.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM backlog_items WHERE user_id = ? AND status = 'pending' ORDER BY created_at ASC",
+            (user_id,),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+
+async def update_backlog_status(item_id: int, user_id: int, status: str) -> None:
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute(
+            "UPDATE backlog_items SET status = ? WHERE id = ? AND user_id = ?",
+            (status, item_id, user_id),
+        )
+        await db.commit()
+
+
+async def delete_backlog_item(item_id: int, user_id: int) -> None:
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute(
+            "DELETE FROM backlog_items WHERE id = ? AND user_id = ?",
+            (item_id, user_id),
+        )
+        await db.commit()
